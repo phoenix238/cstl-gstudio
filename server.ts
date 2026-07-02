@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { verifyFirebaseAuth } from "./server/auth";
 
 dotenv.config();
 
@@ -26,8 +27,11 @@ async function startServer() {
     return aiClient;
   }
 
+  const apiRouter = express.Router();
+  apiRouter.use(verifyFirebaseAuth);
+
   // API endpoint to transcribe raw audio (base64) using Gemini 3.5 Flash
-  app.post("/api/transcribe", async (req: any, res: any) => {
+  apiRouter.post("/transcribe", async (req: any, res: any) => {
     try {
       const { audio, mimeType } = req.body;
       if (!audio) {
@@ -64,7 +68,7 @@ async function startServer() {
   });
 
   // API endpoint to summarize transcription into clinical bullet points using Gemini 3.5 Flash
-  app.post("/api/summarize", async (req: any, res: any) => {
+  apiRouter.post("/summarize", async (req: any, res: any) => {
     try {
       const { text } = req.body;
       if (!text) {
@@ -91,7 +95,7 @@ async function startServer() {
   });
 
   // API endpoint to parse client inquiries and suggest booking times
-  app.post("/api/parse-booking", async (req: any, res: any) => {
+  apiRouter.post("/parse-booking", async (req: any, res: any) => {
     try {
       const { text, currentTime, existingEvents, clients } = req.body;
       if (!text) {
@@ -226,19 +230,23 @@ Client Inquiry message content:
   });
 
   // Generic Google API Proxy to bypass browser/CORS/iframe restrictions
-  app.post("/api/google-proxy", async (req: any, res: any) => {
+  apiRouter.post("/google-proxy", async (req: any, res: any) => {
     try {
       const { url, method, headers, body } = req.body;
       if (!url) {
         return res.status(400).json({ error: "Missing proxy URL" });
       }
 
-      // Security check: restrict proxying to googleapis domain
       if (!url.startsWith("https://www.googleapis.com/") && !url.startsWith("https://googleapis.com/")) {
         return res.status(400).json({ error: "Forbidden proxy target. Only googleapis.com is supported." });
       }
 
-      console.log(`[Google Proxy] ${method || "GET"} to ${url}`);
+      const authHeader = headers?.Authorization || headers?.authorization;
+      if (!authHeader || !String(authHeader).startsWith("Bearer ")) {
+        return res.status(400).json({ error: "Google access token required in proxy Authorization header." });
+      }
+
+      console.log(`[Google Proxy] ${req.firebaseUid} ${method || "GET"} to ${url}`);
 
       const response = await fetch(url, {
         method: method || "GET",
@@ -261,6 +269,8 @@ Client Inquiry message content:
       return res.status(500).json({ error: error.message || "Failed to proxy request" });
     }
   });
+
+  app.use("/api", apiRouter);
 
   // Vite integration
   if (process.env.NODE_ENV !== "production") {

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Loader2, Sparkles, Check, RefreshCw, AlertTriangle, Play, Pause } from 'lucide-react';
 import { appendTextToGoogleDoc } from '../googleApi';
+import { apiFetch } from '../apiClient';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface AudioRecorderProps {
@@ -155,11 +156,8 @@ export default function AudioRecorder({
 
         setStatusMsg('AI Clinical Scribe is transcribing audio...');
         
-        const response = await fetch('/api/transcribe', {
+        const response = await apiFetch('/api/transcribe', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
           body: JSON.stringify({
             audio: base64Audio,
             mimeType: mimeType,
@@ -177,11 +175,8 @@ export default function AudioRecorder({
         // Auto-generate bulleted summary from transcription
         setStatusMsg('Generating clinical bullet-point summary...');
         try {
-          const summaryResponse = await fetch('/api/summarize', {
+          const summaryResponse = await apiFetch('/api/summarize', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
             body: JSON.stringify({
               text: data.text,
             }),

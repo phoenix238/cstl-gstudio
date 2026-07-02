@@ -4,21 +4,25 @@
  * Routed through a server-side proxy to guarantee 100% bypass of browser CORS and security restriction policies.
  */
 
-// Helper to route all Google API requests through the local Express proxy
+import { apiFetch } from './apiClient';
+import { GoogleTokenExpiredError } from './firebase';
+
 const fetchWithProxy = async (url: string, options: any = {}): Promise<Response> => {
   try {
-    const response = await fetch('/api/google-proxy', {
+    const response = await apiFetch('/api/google-proxy', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
       body: JSON.stringify({
         url,
         method: options.method || 'GET',
         headers: options.headers || {},
-        body: options.body || undefined
-      })
+        body: options.body || undefined,
+      }),
     });
+
+    if (response.status === 401) {
+      throw new GoogleTokenExpiredError();
+    }
+
     return response;
   } catch (err) {
     console.error('Proxy request failed locally:', err);

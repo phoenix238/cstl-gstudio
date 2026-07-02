@@ -7,47 +7,83 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Configure Google OAuth provider with requested scopes
+const TOKEN_KEY = 'google_access_token';
+const TOKEN_EXPIRY_KEY = 'google_access_token_expiry';
+const TOKEN_TTL_MS = 55 * 60 * 1000;
+
+export class GoogleTokenExpiredError extends Error {
+  constructor(message = 'Google Workspace access expired. Please sign in again.') {
+    super(message);
+    this.name = 'GoogleTokenExpiredError';
+  }
+}
+
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('https://www.googleapis.com/auth/calendar');
 googleProvider.addScope('https://www.googleapis.com/auth/documents');
 googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
 
-// In-memory/localStorage access token cache (privacy and security compliance)
-let cachedAccessToken: string | null = typeof window !== 'undefined' ? localStorage.getItem('google_access_token') : null;
+let cachedAccessToken: string | null = null;
 let isSigningIn = false;
 
-// Initialize auth state listener
+function readStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const token = sessionStorage.getItem(TOKEN_KEY);
+  const expiry = sessionStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!token || !expiry || Date.now() >= Number(expiry)) {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+    return null;
+  }
+  return token;
+}
+
+function persistAccessToken(token: string) {
+  cachedAccessToken = token;
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + TOKEN_TTL_MS));
+  }
+}
+
+function clearStoredToken() {
+  cachedAccessToken = null;
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  }
+}
+
+export function isGoogleTokenExpired(): boolean {
+  if (typeof window === 'undefined') return true;
+  const expiry = sessionStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!expiry) return true;
+  return Date.now() >= Number(expiry);
+}
+
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  cachedAccessToken = readStoredToken();
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+      const storedToken = readStoredToken();
+      if (storedToken) {
+        cachedAccessToken = storedToken;
+        onAuthSuccess?.(user, storedToken);
       } else if (!isSigningIn) {
-        // Try reading from localStorage one more time
-        const storedToken = typeof window !== 'undefined' ? localStorage.getItem('google_access_token') : null;
-        if (storedToken) {
-          cachedAccessToken = storedToken;
-          if (onAuthSuccess) onAuthSuccess(user, storedToken);
-        } else {
-          cachedAccessToken = null;
-          if (onAuthFailure) onAuthFailure();
-        }
+        cachedAccessToken = null;
+        onAuthFailure?.();
       }
     } else {
-      cachedAccessToken = null;
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('google_access_token');
-      }
-      if (onAuthFailure) onAuthFailure();
+      clearStoredToken();
+      onAuthFailure?.();
     }
   });
 };
 
-// Initiate Google Sign-In popup with correct scopes
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
@@ -57,12 +93,9 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
       throw new Error('Failed to retrieve Google Access Token.');
     }
 
-    cachedAccessToken = credential.accessToken;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('google_access_token', cachedAccessToken);
-    }
-    return { user: result.user, accessToken: cachedAccessToken };
-  } catch (error: any) {
+    persistAccessToken(credential.accessToken);
+    return { user: result.user, accessToken: credential.accessToken };
+  } catch (error: unknown) {
     console.error('Google Sign-In Error:', error);
     throw error;
   } finally {
@@ -70,28 +103,41 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
   }
 };
 
-// Retrieve current cached Google access token securely
-export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+export const refreshGoogleAccessToken = async (): Promise<string> => {
+  const result = await googleSignIn();
+  if (!result?.accessToken) {
+    throw new GoogleTokenExpiredError();
+  }
+  return result.accessToken;
 };
 
-// Set token directly (e.g. from state) if needed
+export const getAccessToken = async (): Promise<string | null> => {
+  if (cachedAccessToken && !isGoogleTokenExpired()) {
+    return cachedAccessToken;
+  }
+  const stored = readStoredToken();
+  if (stored) {
+    cachedAccessToken = stored;
+    return stored;
+  }
+  return null;
+};
+
+export const ensureGoogleAccessToken = async (): Promise<string> => {
+  const token = await getAccessToken();
+  if (token) return token;
+  return refreshGoogleAccessToken();
+};
+
 export const setAccessToken = (token: string | null) => {
-  cachedAccessToken = token;
-  if (typeof window !== 'undefined') {
-    if (token) {
-      localStorage.setItem('google_access_token', token);
-    } else {
-      localStorage.removeItem('google_access_token');
-    }
+  if (token) {
+    persistAccessToken(token);
+  } else {
+    clearStoredToken();
   }
 };
 
-// Log out and clear cache
 export const googleLogout = async () => {
   await auth.signOut();
-  cachedAccessToken = null;
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem('google_access_token');
-  }
+  clearStoredToken();
 };

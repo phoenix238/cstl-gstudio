@@ -1,6 +1,6 @@
 {
   "name": "Therapy Control Center",
-  "description": "Centralized dashboard for therapists to manage schedules, track client case notes, and securely dictate session summaries.",
+  "description": "Practice dashboard for therapists: client registry, scheduling, AI booking replies, and session dictation synced to Google Workspace.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
