@@ -1,0 +1,6 @@
+{
+  "name": "Therapy Control Center",
+  "description": "Centralized dashboard for therapists to manage schedules, track client case notes, and securely dictate session summaries.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
